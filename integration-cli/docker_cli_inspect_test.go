@@ -11,8 +11,9 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/integration-cli/checker"
-	icmd "github.com/docker/docker/pkg/testutil/cmd"
 	"github.com/go-check/check"
+	"gotest.tools/assert"
+	"gotest.tools/icmd"
 )
 
 func checkValidGraphDriver(c *check.C, name string) {
@@ -53,10 +54,7 @@ func (s *DockerSuite) TestInspectDefault(c *check.C) {
 }
 
 func (s *DockerSuite) TestInspectStatus(c *check.C) {
-	if testEnv.DaemonPlatform() != "windows" {
-		defer unpauseAllContainers(c)
-	}
-	out, _ := runSleepingContainer(c, "-d")
+	out := runSleepingContainer(c, "-d")
 	out = strings.TrimSpace(out)
 
 	inspectOut := inspectField(c, out, "State.Status")
@@ -64,7 +62,7 @@ func (s *DockerSuite) TestInspectStatus(c *check.C) {
 
 	// Windows does not support pause/unpause on Windows Server Containers.
 	// (RS1 does for Hyper-V Containers, but production CI is not setup for that)
-	if testEnv.DaemonPlatform() != "windows" {
+	if testEnv.OSType != "windows" {
 		dockerCmd(c, "pause", out)
 		inspectOut = inspectField(c, out, "State.Status")
 		c.Assert(inspectOut, checker.Equals, "paused")
@@ -87,7 +85,7 @@ func (s *DockerSuite) TestInspectTypeFlagContainer(c *check.C) {
 
 	formatStr := "--format={{.State.Running}}"
 	out, _ := dockerCmd(c, "inspect", "--type=container", formatStr, "busybox")
-	c.Assert(out, checker.Equals, "true\n") // not a container JSON
+	assert.Equal(c, out, "true\n") // not a container JSON
 }
 
 func (s *DockerSuite) TestInspectTypeFlagWithNoContainer(c *check.C) {
@@ -99,7 +97,7 @@ func (s *DockerSuite) TestInspectTypeFlagWithNoContainer(c *check.C) {
 
 	_, _, err := dockerCmdWithError("inspect", "--type=container", "busybox")
 	// docker inspect should fail, as there is no container named busybox
-	c.Assert(err, checker.NotNil)
+	assert.ErrorContains(c, err, "")
 }
 
 func (s *DockerSuite) TestInspectTypeFlagWithImage(c *check.C) {
@@ -137,7 +135,7 @@ func (s *DockerSuite) TestInspectImageFilterInt(c *check.C) {
 	formatStr := fmt.Sprintf("--format={{eq .Size %d}}", size)
 	out, _ = dockerCmd(c, "inspect", formatStr, imageTest)
 	result, err := strconv.ParseBool(strings.TrimSuffix(out, "\n"))
-	c.Assert(err, checker.IsNil)
+	assert.NilError(c, err)
 	c.Assert(result, checker.Equals, true)
 }
 
@@ -159,7 +157,7 @@ func (s *DockerSuite) TestInspectContainerFilterInt(c *check.C) {
 	formatStr := fmt.Sprintf("--format={{eq .State.ExitCode %d}}", exitCode)
 	out, _ = dockerCmd(c, "inspect", formatStr, id)
 	inspectResult, err := strconv.ParseBool(strings.TrimSuffix(out, "\n"))
-	c.Assert(err, checker.IsNil)
+	assert.NilError(c, err)
 	c.Assert(inspectResult, checker.Equals, true)
 }
 
@@ -209,7 +207,7 @@ func (s *DockerSuite) TestInspectContainerGraphDriver(c *check.C) {
 func (s *DockerSuite) TestInspectBindMountPoint(c *check.C) {
 	modifier := ",z"
 	prefix, slash := getPrefixAndSlashFromDaemonPlatform()
-	if testEnv.DaemonPlatform() == "windows" {
+	if testEnv.OSType == "windows" {
 		modifier = ""
 		// Linux creates the host directory if it doesn't exist. Windows does not.
 		os.Mkdir(`c:\data`, os.ModeDir)
@@ -221,7 +219,7 @@ func (s *DockerSuite) TestInspectBindMountPoint(c *check.C) {
 
 	var mp []types.MountPoint
 	err := json.Unmarshal([]byte(vol), &mp)
-	c.Assert(err, checker.IsNil)
+	assert.NilError(c, err)
 
 	// check that there is only one mountpoint
 	c.Assert(mp, check.HasLen, 1)
@@ -232,7 +230,7 @@ func (s *DockerSuite) TestInspectBindMountPoint(c *check.C) {
 	c.Assert(m.Driver, checker.Equals, "")
 	c.Assert(m.Source, checker.Equals, prefix+slash+"data")
 	c.Assert(m.Destination, checker.Equals, prefix+slash+"data")
-	if testEnv.DaemonPlatform() != "windows" { // Windows does not set mode
+	if testEnv.OSType != "windows" { // Windows does not set mode
 		c.Assert(m.Mode, checker.Equals, "ro"+modifier)
 	}
 	c.Assert(m.RW, checker.Equals, false)
@@ -247,7 +245,7 @@ func (s *DockerSuite) TestInspectNamedMountPoint(c *check.C) {
 
 	var mp []types.MountPoint
 	err := json.Unmarshal([]byte(vol), &mp)
-	c.Assert(err, checker.IsNil)
+	assert.NilError(c, err)
 
 	// check that there is only one mountpoint
 	c.Assert(mp, checker.HasLen, 1)
@@ -270,16 +268,16 @@ func (s *DockerSuite) TestInspectTimesAsRFC3339Nano(c *check.C) {
 	created := inspectField(c, id, "Created")
 
 	_, err := time.Parse(time.RFC3339Nano, startedAt)
-	c.Assert(err, checker.IsNil)
+	assert.NilError(c, err)
 	_, err = time.Parse(time.RFC3339Nano, finishedAt)
-	c.Assert(err, checker.IsNil)
+	assert.NilError(c, err)
 	_, err = time.Parse(time.RFC3339Nano, created)
-	c.Assert(err, checker.IsNil)
+	assert.NilError(c, err)
 
 	created = inspectField(c, "busybox", "Created")
 
 	_, err = time.Parse(time.RFC3339Nano, created)
-	c.Assert(err, checker.IsNil)
+	assert.NilError(c, err)
 }
 
 // #15633
@@ -337,13 +335,13 @@ func (s *DockerSuite) TestInspectJSONFields(c *check.C) {
 	runSleepingContainer(c, "--name=busybox", "-d")
 	out, _, err := dockerCmdWithError("inspect", "--type=container", "--format={{.HostConfig.Dns}}", "busybox")
 
-	c.Assert(err, check.IsNil)
-	c.Assert(out, checker.Equals, "[]\n")
+	assert.NilError(c, err)
+	assert.Equal(c, out, "[]\n")
 }
 
 func (s *DockerSuite) TestInspectByPrefix(c *check.C) {
 	id := inspectField(c, "busybox", "Id")
-	c.Assert(id, checker.HasPrefix, "sha256:")
+	assert.Assert(c, strings.HasPrefix(id, "sha256:"))
 
 	id2 := inspectField(c, id[:12], "Id")
 	c.Assert(id, checker.Equals, id2)
@@ -375,7 +373,7 @@ func (s *DockerSuite) TestInspectHistory(c *check.C) {
 	dockerCmd(c, "run", "--name=testcont", "busybox", "echo", "hello")
 	dockerCmd(c, "commit", "-m", "test comment", "testcont", "testimg")
 	out, _, err := dockerCmdWithError("inspect", "--format='{{.Comment}}'", "testimg")
-	c.Assert(err, check.IsNil)
+	assert.NilError(c, err)
 	c.Assert(out, checker.Contains, "test comment")
 }
 
@@ -388,7 +386,7 @@ func (s *DockerSuite) TestInspectContainerNetworkDefault(c *check.C) {
 	out := inspectField(c, contName, "NetworkSettings.Networks")
 	c.Assert(out, checker.Contains, "bridge")
 	out = inspectField(c, contName, "NetworkSettings.Networks.bridge.NetworkID")
-	c.Assert(strings.TrimSpace(out), checker.Equals, strings.TrimSpace(netOut))
+	assert.Equal(c, strings.TrimSpace(out), strings.TrimSpace(netOut))
 }
 
 func (s *DockerSuite) TestInspectContainerNetworkCustom(c *check.C) {
@@ -399,18 +397,17 @@ func (s *DockerSuite) TestInspectContainerNetworkCustom(c *check.C) {
 	out := inspectField(c, "container1", "NetworkSettings.Networks")
 	c.Assert(out, checker.Contains, "net1")
 	out = inspectField(c, "container1", "NetworkSettings.Networks.net1.NetworkID")
-	c.Assert(strings.TrimSpace(out), checker.Equals, strings.TrimSpace(netOut))
+	assert.Equal(c, strings.TrimSpace(out), strings.TrimSpace(netOut))
 }
 
 func (s *DockerSuite) TestInspectRootFS(c *check.C) {
 	out, _, err := dockerCmdWithError("inspect", "busybox")
-	c.Assert(err, check.IsNil)
+	assert.NilError(c, err)
 
 	var imageJSON []types.ImageInspect
 	err = json.Unmarshal([]byte(out), &imageJSON)
-	c.Assert(err, checker.IsNil)
-
-	c.Assert(len(imageJSON[0].RootFS.Layers), checker.GreaterOrEqualThan, 1)
+	assert.NilError(c, err)
+	assert.Assert(c, len(imageJSON[0].RootFS.Layers) >= 1)
 }
 
 func (s *DockerSuite) TestInspectAmpersand(c *check.C) {
@@ -426,30 +423,30 @@ func (s *DockerSuite) TestInspectAmpersand(c *check.C) {
 func (s *DockerSuite) TestInspectPlugin(c *check.C) {
 	testRequires(c, DaemonIsLinux, IsAmd64, Network)
 	_, _, err := dockerCmdWithError("plugin", "install", "--grant-all-permissions", pNameWithTag)
-	c.Assert(err, checker.IsNil)
+	assert.NilError(c, err)
 
 	out, _, err := dockerCmdWithError("inspect", "--type", "plugin", "--format", "{{.Name}}", pNameWithTag)
-	c.Assert(err, checker.IsNil)
-	c.Assert(strings.TrimSpace(out), checker.Equals, pNameWithTag)
+	assert.NilError(c, err)
+	assert.Equal(c, strings.TrimSpace(out), pNameWithTag)
 
 	out, _, err = dockerCmdWithError("inspect", "--format", "{{.Name}}", pNameWithTag)
-	c.Assert(err, checker.IsNil)
-	c.Assert(strings.TrimSpace(out), checker.Equals, pNameWithTag)
+	assert.NilError(c, err)
+	assert.Equal(c, strings.TrimSpace(out), pNameWithTag)
 
 	// Even without tag the inspect still work
 	out, _, err = dockerCmdWithError("inspect", "--type", "plugin", "--format", "{{.Name}}", pNameWithTag)
-	c.Assert(err, checker.IsNil)
-	c.Assert(strings.TrimSpace(out), checker.Equals, pNameWithTag)
+	assert.NilError(c, err)
+	assert.Equal(c, strings.TrimSpace(out), pNameWithTag)
 
 	out, _, err = dockerCmdWithError("inspect", "--format", "{{.Name}}", pNameWithTag)
-	c.Assert(err, checker.IsNil)
-	c.Assert(strings.TrimSpace(out), checker.Equals, pNameWithTag)
+	assert.NilError(c, err)
+	assert.Equal(c, strings.TrimSpace(out), pNameWithTag)
 
 	_, _, err = dockerCmdWithError("plugin", "disable", pNameWithTag)
-	c.Assert(err, checker.IsNil)
+	assert.NilError(c, err)
 
 	out, _, err = dockerCmdWithError("plugin", "remove", pNameWithTag)
-	c.Assert(err, checker.IsNil)
+	assert.NilError(c, err)
 	c.Assert(out, checker.Contains, pNameWithTag)
 }
 
@@ -457,15 +454,7 @@ func (s *DockerSuite) TestInspectPlugin(c *check.C) {
 func (s *DockerSuite) TestInspectUnknownObject(c *check.C) {
 	// This test should work on both Windows and Linux
 	out, _, err := dockerCmdWithError("inspect", "foobar")
-	c.Assert(err, checker.NotNil)
+	assert.ErrorContains(c, err, "")
 	c.Assert(out, checker.Contains, "Error: No such object: foobar")
-	c.Assert(err.Error(), checker.Contains, "Error: No such object: foobar")
-}
-
-func (s *DockerSuite) TestInspectInvalidReference(c *check.C) {
-	// This test should work on both Windows and Linux
-	out, _, err := dockerCmdWithError("inspect", "FooBar")
-	c.Assert(err, checker.NotNil)
-	c.Assert(out, checker.Contains, "Error: No such object: FooBar")
-	c.Assert(err.Error(), checker.Contains, "Error: No such object: FooBar")
+	assert.ErrorContains(c, err, "Error: No such object: foobar")
 }

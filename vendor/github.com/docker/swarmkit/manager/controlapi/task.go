@@ -1,13 +1,14 @@
 package controlapi
 
 import (
+	"context"
+
 	"github.com/docker/swarmkit/api"
 	"github.com/docker/swarmkit/api/naming"
 	"github.com/docker/swarmkit/manager/orchestrator"
 	"github.com/docker/swarmkit/manager/state/store"
-	"golang.org/x/net/context"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // GetTask returns a Task given a TaskID.
@@ -15,7 +16,7 @@ import (
 // - Returns `NotFound` if the Task is not found.
 func (s *Server) GetTask(ctx context.Context, request *api.GetTaskRequest) (*api.GetTaskResponse, error) {
 	if request.TaskID == "" {
-		return nil, grpc.Errorf(codes.InvalidArgument, errInvalidArgument.Error())
+		return nil, status.Errorf(codes.InvalidArgument, errInvalidArgument.Error())
 	}
 
 	var task *api.Task
@@ -23,7 +24,7 @@ func (s *Server) GetTask(ctx context.Context, request *api.GetTaskRequest) (*api
 		task = store.GetTask(tx, request.TaskID)
 	})
 	if task == nil {
-		return nil, grpc.Errorf(codes.NotFound, "task %s not found", request.TaskID)
+		return nil, status.Errorf(codes.NotFound, "task %s not found", request.TaskID)
 	}
 	return &api.GetTaskResponse{
 		Task: task,
@@ -36,7 +37,7 @@ func (s *Server) GetTask(ctx context.Context, request *api.GetTaskRequest) (*api
 // - Returns an error if the deletion fails.
 func (s *Server) RemoveTask(ctx context.Context, request *api.RemoveTaskRequest) (*api.RemoveTaskResponse, error) {
 	if request.TaskID == "" {
-		return nil, grpc.Errorf(codes.InvalidArgument, errInvalidArgument.Error())
+		return nil, status.Errorf(codes.InvalidArgument, errInvalidArgument.Error())
 	}
 
 	err := s.store.Update(func(tx store.Tx) error {
@@ -44,7 +45,7 @@ func (s *Server) RemoveTask(ctx context.Context, request *api.RemoveTaskRequest)
 	})
 	if err != nil {
 		if err == store.ErrNotExist {
-			return nil, grpc.Errorf(codes.NotFound, "task %s not found", request.TaskID)
+			return nil, status.Errorf(codes.NotFound, "task %s not found", request.TaskID)
 		}
 		return nil, err
 	}
@@ -87,6 +88,8 @@ func (s *Server) ListTasks(ctx context.Context, request *api.ListTasksRequest) (
 			tasks, err = store.FindTasks(tx, buildFilters(store.ByIDPrefix, request.Filters.IDPrefixes))
 		case request.Filters != nil && len(request.Filters.ServiceIDs) > 0:
 			tasks, err = store.FindTasks(tx, buildFilters(store.ByServiceID, request.Filters.ServiceIDs))
+		case request.Filters != nil && len(request.Filters.Runtimes) > 0:
+			tasks, err = store.FindTasks(tx, buildFilters(store.ByRuntime, request.Filters.Runtimes))
 		case request.Filters != nil && len(request.Filters.NodeIDs) > 0:
 			tasks, err = store.FindTasks(tx, buildFilters(store.ByNodeID, request.Filters.NodeIDs))
 		case request.Filters != nil && len(request.Filters.DesiredStates) > 0:
@@ -123,6 +126,16 @@ func (s *Server) ListTasks(ctx context.Context, request *api.ListTasksRequest) (
 				return filterContains(e.NodeID, request.Filters.NodeIDs)
 			},
 			func(e *api.Task) bool {
+				if len(request.Filters.Runtimes) == 0 {
+					return true
+				}
+				r, err := naming.Runtime(e.Spec)
+				if err != nil {
+					return false
+				}
+				return filterContains(r, request.Filters.Runtimes)
+			},
+			func(e *api.Task) bool {
 				if len(request.Filters.DesiredStates) == 0 {
 					return true
 				}
@@ -143,7 +156,8 @@ func (s *Server) ListTasks(ctx context.Context, request *api.ListTasksRequest) (
 					return false
 				}
 
-				return !orchestrator.IsTaskDirty(service, e)
+				n := store.GetNode(tx, e.NodeID)
+				return !orchestrator.IsTaskDirty(service, e, n)
 			},
 		)
 	})

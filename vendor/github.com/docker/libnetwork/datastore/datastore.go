@@ -115,7 +115,10 @@ const (
 	// LocalScope indicates to store the KV object in local datastore such as boltdb
 	LocalScope = "local"
 	// GlobalScope indicates to store the KV object in global datastore such as consul/etcd/zookeeper
-	GlobalScope   = "global"
+	GlobalScope = "global"
+	// SwarmScope is not indicating a datastore location. It is defined here
+	// along with the other two scopes just for consistency.
+	SwarmScope    = "swarm"
 	defaultPrefix = "/var/lib/docker/network/files"
 )
 
@@ -182,7 +185,7 @@ func Key(key ...string) string {
 func ParseKey(key string) ([]string, error) {
 	chain := strings.Split(strings.Trim(key, "/"), "/")
 
-	// The key must atleast be equal to the rootChain in order to be considered as valid
+	// The key must at least be equal to the rootChain in order to be considered as valid
 	if len(chain) <= len(rootChain) || !reflect.DeepEqual(chain[0:len(rootChain)], rootChain) {
 		return nil, types.BadRequestErrorf("invalid Key : %s", key)
 	}
@@ -586,7 +589,7 @@ func (ds *datastore) DeleteObject(kvObject KVObject) error {
 		defer ds.Unlock()
 	}
 
-	// cleaup the cache first
+	// cleanup the cache first
 	if ds.cache != nil {
 		// If persistent store is skipped, sequencing needs to
 		// happen in cache.
@@ -642,7 +645,7 @@ func (ds *datastore) DeleteTree(kvObject KVObject) error {
 		defer ds.Unlock()
 	}
 
-	// cleaup the cache first
+	// cleanup the cache first
 	if ds.cache != nil {
 		// If persistent store is skipped, sequencing needs to
 		// happen in cache.

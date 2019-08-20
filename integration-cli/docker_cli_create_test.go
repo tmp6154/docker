@@ -3,18 +3,20 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"reflect"
 	"strings"
 	"time"
 
 	"github.com/docker/docker/integration-cli/checker"
+	"github.com/docker/docker/integration-cli/cli"
+	"github.com/docker/docker/integration-cli/cli/build"
+	"github.com/docker/docker/internal/test/fakecontext"
 	"github.com/docker/docker/pkg/stringid"
-	"github.com/docker/docker/pkg/testutil"
-	icmd "github.com/docker/docker/pkg/testutil/cmd"
 	"github.com/docker/go-connections/nat"
 	"github.com/go-check/check"
+	"gotest.tools/assert"
+	is "gotest.tools/assert/cmp"
 )
 
 // Make sure we can create a simple container with some args
@@ -26,17 +28,17 @@ func (s *DockerSuite) TestCreateArgs(c *check.C) {
 
 	out, _ = dockerCmd(c, "inspect", cleanedContainerID)
 
-	containers := []struct {
+	var containers []struct {
 		ID      string
 		Created time.Time
 		Path    string
 		Args    []string
 		Image   string
-	}{}
+	}
 
 	err := json.Unmarshal([]byte(out), &containers)
 	c.Assert(err, check.IsNil, check.Commentf("Error inspecting the container: %s", err))
-	c.Assert(containers, checker.HasLen, 1)
+	assert.Equal(c, len(containers), 1)
 
 	cont := containers[0]
 	c.Assert(string(cont.Path), checker.Equals, "command", check.Commentf("Unexpected container path. Expected command, received: %s", cont.Path))
@@ -58,7 +60,7 @@ func (s *DockerSuite) TestCreateArgs(c *check.C) {
 // Make sure we can grow the container's rootfs at creation time.
 func (s *DockerSuite) TestCreateGrowRootfs(c *check.C) {
 	// Windows and Devicemapper support growing the rootfs
-	if testEnv.DaemonPlatform() != "windows" {
+	if testEnv.OSType != "windows" {
 		testRequires(c, Devicemapper)
 	}
 	out, _ := dockerCmd(c, "create", "--storage-opt", "size=120G", "busybox")
@@ -75,7 +77,7 @@ func (s *DockerSuite) TestCreateShrinkRootfs(c *check.C) {
 
 	// Ensure this fails because of the defaultBaseFsSize is 10G
 	out, _, err := dockerCmdWithError("create", "--storage-opt", "size=5G", "busybox")
-	c.Assert(err, check.NotNil, check.Commentf(out))
+	assert.ErrorContains(c, err, "", out)
 	c.Assert(out, checker.Contains, "Container size cannot be smaller than")
 }
 
@@ -87,15 +89,15 @@ func (s *DockerSuite) TestCreateHostConfig(c *check.C) {
 
 	out, _ = dockerCmd(c, "inspect", cleanedContainerID)
 
-	containers := []struct {
+	var containers []struct {
 		HostConfig *struct {
 			PublishAllPorts bool
 		}
-	}{}
+	}
 
 	err := json.Unmarshal([]byte(out), &containers)
 	c.Assert(err, check.IsNil, check.Commentf("Error inspecting the container: %s", err))
-	c.Assert(containers, checker.HasLen, 1)
+	assert.Equal(c, len(containers), 1)
 
 	cont := containers[0]
 	c.Assert(cont.HostConfig, check.NotNil, check.Commentf("Expected HostConfig, got none"))
@@ -109,14 +111,14 @@ func (s *DockerSuite) TestCreateWithPortRange(c *check.C) {
 
 	out, _ = dockerCmd(c, "inspect", cleanedContainerID)
 
-	containers := []struct {
+	var containers []struct {
 		HostConfig *struct {
 			PortBindings map[nat.Port][]nat.PortBinding
 		}
-	}{}
+	}
 	err := json.Unmarshal([]byte(out), &containers)
 	c.Assert(err, check.IsNil, check.Commentf("Error inspecting the container: %s", err))
-	c.Assert(containers, checker.HasLen, 1)
+	assert.Equal(c, len(containers), 1)
 
 	cont := containers[0]
 
@@ -138,15 +140,15 @@ func (s *DockerSuite) TestCreateWithLargePortRange(c *check.C) {
 
 	out, _ = dockerCmd(c, "inspect", cleanedContainerID)
 
-	containers := []struct {
+	var containers []struct {
 		HostConfig *struct {
 			PortBindings map[nat.Port][]nat.PortBinding
 		}
-	}{}
+	}
 
 	err := json.Unmarshal([]byte(out), &containers)
 	c.Assert(err, check.IsNil, check.Commentf("Error inspecting the container: %s", err))
-	c.Assert(containers, checker.HasLen, 1)
+	assert.Equal(c, len(containers), 1)
 
 	cont := containers[0]
 	c.Assert(cont.HostConfig, check.NotNil, check.Commentf("Expected HostConfig, got none"))
@@ -166,12 +168,11 @@ func (s *DockerSuite) TestCreateEchoStdout(c *check.C) {
 	cleanedContainerID := strings.TrimSpace(out)
 
 	out, _ = dockerCmd(c, "start", "-ai", cleanedContainerID)
-	c.Assert(out, checker.Equals, "test123\n", check.Commentf("container should've printed 'test123', got %q", out))
-
+	assert.Equal(c, out, "test123\n", "container should've printed 'test123', got %q", out)
 }
 
 func (s *DockerSuite) TestCreateVolumesCreated(c *check.C) {
-	testRequires(c, SameHostDaemon)
+	testRequires(c, testEnv.IsLocalDaemon)
 	prefix, slash := getPrefixAndSlashFromDaemonPlatform()
 
 	name := "test_create_volume"
@@ -204,7 +205,7 @@ func (s *DockerSuite) TestCreateLabels(c *check.C) {
 
 func (s *DockerSuite) TestCreateLabelFromImage(c *check.C) {
 	imageName := "testcreatebuildlabel"
-	buildImageSuccessfully(c, imageName, withDockerfile(`FROM busybox
+	buildImageSuccessfully(c, imageName, build.WithDockerfile(`FROM busybox
 		LABEL k1=v1 k2=v2`))
 
 	name := "test_create_labels_from_image"
@@ -222,12 +223,11 @@ func (s *DockerSuite) TestCreateLabelFromImage(c *check.C) {
 func (s *DockerSuite) TestCreateHostnameWithNumber(c *check.C) {
 	image := "busybox"
 	// Busybox on Windows does not implement hostname command
-	if testEnv.DaemonPlatform() == "windows" {
-		image = testEnv.MinimalBaseImage()
+	if testEnv.OSType == "windows" {
+		image = testEnv.PlatformDefaults.BaseImage
 	}
 	out, _ := dockerCmd(c, "run", "-h", "web.0", image, "hostname")
-	c.Assert(strings.TrimSpace(out), checker.Equals, "web.0", check.Commentf("hostname not set, expected `web.0`, got: %s", out))
-
+	assert.Equal(c, strings.TrimSpace(out), "web.0", "hostname not set, expected `web.0`, got: %s", out)
 }
 
 func (s *DockerSuite) TestCreateRM(c *check.C) {
@@ -249,7 +249,7 @@ func (s *DockerSuite) TestCreateRM(c *check.C) {
 
 func (s *DockerSuite) TestCreateModeIpcContainer(c *check.C) {
 	// Uses Linux specific functionality (--ipc)
-	testRequires(c, DaemonIsLinux, SameHostDaemon)
+	testRequires(c, DaemonIsLinux, testEnv.IsLocalDaemon)
 
 	out, _ := dockerCmd(c, "create", "busybox")
 	id := strings.TrimSpace(out)
@@ -259,14 +259,13 @@ func (s *DockerSuite) TestCreateModeIpcContainer(c *check.C) {
 
 func (s *DockerSuite) TestCreateByImageID(c *check.C) {
 	imageName := "testcreatebyimageid"
-	buildImageSuccessfully(c, imageName, withDockerfile(`FROM busybox
+	buildImageSuccessfully(c, imageName, build.WithDockerfile(`FROM busybox
 		MAINTAINER dockerio`))
 	imageID := getIDByName(c, imageName)
 	truncatedImageID := stringid.TruncateID(imageID)
 
 	dockerCmd(c, "create", imageID)
 	dockerCmd(c, "create", truncatedImageID)
-	dockerCmd(c, "create", fmt.Sprintf("%s:%s", imageName, truncatedImageID))
 
 	// Ensure this fails
 	out, exit, _ := dockerCmdWithError("create", fmt.Sprintf("%s:%s", imageName, imageID))
@@ -278,7 +277,10 @@ func (s *DockerSuite) TestCreateByImageID(c *check.C) {
 		c.Fatalf(`Expected %q in output; got: %s`, expected, out)
 	}
 
-	out, exit, _ = dockerCmdWithError("create", fmt.Sprintf("%s:%s", "wrongimage", truncatedImageID))
+	if i := strings.IndexRune(imageID, ':'); i >= 0 {
+		imageID = imageID[i+1:]
+	}
+	out, exit, _ = dockerCmdWithError("create", fmt.Sprintf("%s:%s", "wrongimage", imageID))
 	if exit == 0 {
 		c.Fatalf("expected non-zero exit code; received %d", exit)
 	}
@@ -286,104 +288,6 @@ func (s *DockerSuite) TestCreateByImageID(c *check.C) {
 	if expected := "Unable to find image"; !strings.Contains(out, expected) {
 		c.Fatalf(`Expected %q in output; got: %s`, expected, out)
 	}
-}
-
-func (s *DockerTrustSuite) TestTrustedCreate(c *check.C) {
-	repoName := s.setupTrustedImage(c, "trusted-create")
-
-	// Try create
-	icmd.RunCmd(icmd.Command(dockerBinary, "create", repoName), trustedCmd).Assert(c, SuccessTagging)
-
-	dockerCmd(c, "rmi", repoName)
-
-	// Try untrusted create to ensure we pushed the tag to the registry
-	icmd.RunCmd(icmd.Command(dockerBinary, "create", "--disable-content-trust=true", repoName), trustedCmd).Assert(c, SuccessDownloadedOnStderr)
-}
-
-func (s *DockerTrustSuite) TestUntrustedCreate(c *check.C) {
-	repoName := fmt.Sprintf("%v/dockercliuntrusted/createtest", privateRegistryURL)
-	withTagName := fmt.Sprintf("%s:latest", repoName)
-	// tag the image and upload it to the private registry
-	dockerCmd(c, "tag", "busybox", withTagName)
-	dockerCmd(c, "push", withTagName)
-	dockerCmd(c, "rmi", withTagName)
-
-	// Try trusted create on untrusted tag
-	icmd.RunCmd(icmd.Command(dockerBinary, "create", withTagName), trustedCmd).Assert(c, icmd.Expected{
-		ExitCode: 1,
-		Err:      fmt.Sprintf("does not have trust data for %s", repoName),
-	})
-}
-
-func (s *DockerTrustSuite) TestTrustedIsolatedCreate(c *check.C) {
-	repoName := s.setupTrustedImage(c, "trusted-isolated-create")
-
-	// Try create
-	icmd.RunCmd(icmd.Command(dockerBinary, "--config", "/tmp/docker-isolated-create", "create", repoName), trustedCmd).Assert(c, SuccessTagging)
-
-	dockerCmd(c, "rmi", repoName)
-}
-
-func (s *DockerTrustSuite) TestCreateWhenCertExpired(c *check.C) {
-	c.Skip("Currently changes system time, causing instability")
-	repoName := s.setupTrustedImage(c, "trusted-create-expired")
-
-	// Certificates have 10 years of expiration
-	elevenYearsFromNow := time.Now().Add(time.Hour * 24 * 365 * 11)
-
-	testutil.RunAtDifferentDate(elevenYearsFromNow, func() {
-		// Try create
-		icmd.RunCmd(icmd.Cmd{
-			Command: []string{dockerBinary, "create", repoName},
-		}, trustedCmd).Assert(c, icmd.Expected{
-			ExitCode: 1,
-			Err:      "could not validate the path to a trusted root",
-		})
-	})
-
-	testutil.RunAtDifferentDate(elevenYearsFromNow, func() {
-		// Try create
-		result := icmd.RunCmd(icmd.Command(dockerBinary, "create", "--disable-content-trust", repoName), trustedCmd)
-		c.Assert(result.Error, check.Not(check.IsNil))
-		c.Assert(string(result.Combined()), checker.Contains, "Status: Downloaded", check.Commentf("Missing expected output on trusted create in the distant future:\n%s", result.Combined()))
-
-	})
-}
-
-func (s *DockerTrustSuite) TestTrustedCreateFromBadTrustServer(c *check.C) {
-	repoName := fmt.Sprintf("%v/dockerclievilcreate/trusted:latest", privateRegistryURL)
-	evilLocalConfigDir, err := ioutil.TempDir("", "evilcreate-local-config-dir")
-	c.Assert(err, check.IsNil)
-
-	// tag the image and upload it to the private registry
-	dockerCmd(c, "tag", "busybox", repoName)
-
-	icmd.RunCmd(icmd.Command(dockerBinary, "push", repoName), trustedCmd).Assert(c, SuccessSigningAndPushing)
-
-	dockerCmd(c, "rmi", repoName)
-
-	// Try create
-	icmd.RunCmd(icmd.Command(dockerBinary, "create", repoName), trustedCmd).Assert(c, SuccessTagging)
-
-	dockerCmd(c, "rmi", repoName)
-
-	// Kill the notary server, start a new "evil" one.
-	s.not.Close()
-	s.not, err = newTestNotary(c)
-	c.Assert(err, check.IsNil)
-
-	// In order to make an evil server, lets re-init a client (with a different trust dir) and push new data.
-	// tag an image and upload it to the private registry
-	dockerCmd(c, "--config", evilLocalConfigDir, "tag", "busybox", repoName)
-
-	// Push up to the new server
-	icmd.RunCmd(icmd.Command(dockerBinary, "--config", evilLocalConfigDir, "push", repoName), trustedCmd).Assert(c, SuccessSigningAndPushing)
-
-	// Now, try creating with the original client from this new trust server. This should fail because the new root is invalid.
-	icmd.RunCmd(icmd.Command(dockerBinary, "create", repoName), trustedCmd).Assert(c, icmd.Expected{
-		ExitCode: 1,
-		Err:      "could not rotate trust to a new trusted root",
-	})
 }
 
 func (s *DockerSuite) TestCreateStopSignal(c *check.C) {
@@ -403,7 +307,7 @@ func (s *DockerSuite) TestCreateWithWorkdir(c *check.C) {
 
 	dockerCmd(c, "create", "--name", name, "-w", dir, "busybox")
 	// Windows does not create the workdir until the container is started
-	if testEnv.DaemonPlatform() == "windows" {
+	if testEnv.OSType == "windows" {
 		dockerCmd(c, "start", name)
 	}
 	dockerCmd(c, "cp", fmt.Sprintf("%s:%s", name, dir), prefix+slash+"tmp")
@@ -412,8 +316,9 @@ func (s *DockerSuite) TestCreateWithWorkdir(c *check.C) {
 func (s *DockerSuite) TestCreateWithInvalidLogOpts(c *check.C) {
 	name := "test-invalidate-log-opts"
 	out, _, err := dockerCmdWithError("create", "--name", name, "--log-opt", "invalid=true", "busybox")
-	c.Assert(err, checker.NotNil)
+	assert.ErrorContains(c, err, "")
 	c.Assert(out, checker.Contains, "unknown log opt")
+	assert.Assert(c, is.Contains(out, "unknown log opt"))
 
 	out, _ = dockerCmd(c, "ps", "-a")
 	c.Assert(out, checker.Not(checker.Contains), name)
@@ -436,19 +341,21 @@ RUN chmod 755 /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]
 CMD echo foobar`
 
-	ctx := fakeContext(c, dockerfile, map[string]string{
-		"entrypoint.sh": `#!/bin/sh
+	ctx := fakecontext.New(c, "",
+		fakecontext.WithDockerfile(dockerfile),
+		fakecontext.WithFiles(map[string]string{
+			"entrypoint.sh": `#!/bin/sh
 echo "I am an entrypoint"
 exec "$@"`,
-	})
+		}))
 	defer ctx.Close()
 
-	buildImageSuccessfully(c, name, withExternalBuildContext(ctx))
+	cli.BuildCmd(c, name, build.WithExternalBuildContext(ctx))
 
-	out, _ := dockerCmd(c, "create", "--entrypoint=", name, "echo", "foo")
+	out := cli.DockerCmd(c, "create", "--entrypoint=", name, "echo", "foo").Combined()
 	id := strings.TrimSpace(out)
 	c.Assert(id, check.Not(check.Equals), "")
-	out, _ = dockerCmd(c, "start", "-a", id)
+	out = cli.DockerCmd(c, "start", "-a", id).Combined()
 	c.Assert(strings.TrimSpace(out), check.Equals, "foo")
 }
 

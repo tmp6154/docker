@@ -11,9 +11,12 @@ import (
 	"time"
 
 	"github.com/docker/docker/integration-cli/checker"
+	"github.com/docker/docker/integration-cli/cli/build"
 	"github.com/docker/docker/pkg/stringid"
-	icmd "github.com/docker/docker/pkg/testutil/cmd"
 	"github.com/go-check/check"
+	"gotest.tools/assert"
+	is "gotest.tools/assert/cmp"
+	"gotest.tools/icmd"
 )
 
 func (s *DockerSuite) TestImagesEnsureImageIsListed(c *check.C) {
@@ -46,15 +49,15 @@ func (s *DockerSuite) TestImagesEnsureImageWithBadTagIsNotListed(c *check.C) {
 }
 
 func (s *DockerSuite) TestImagesOrderedByCreationDate(c *check.C) {
-	buildImageSuccessfully(c, "order:test_a", withDockerfile(`FROM busybox
+	buildImageSuccessfully(c, "order:test_a", build.WithDockerfile(`FROM busybox
                 MAINTAINER dockerio1`))
 	id1 := getIDByName(c, "order:test_a")
 	time.Sleep(1 * time.Second)
-	buildImageSuccessfully(c, "order:test_c", withDockerfile(`FROM busybox
+	buildImageSuccessfully(c, "order:test_c", build.WithDockerfile(`FROM busybox
                 MAINTAINER dockerio2`))
 	id2 := getIDByName(c, "order:test_c")
 	time.Sleep(1 * time.Second)
-	buildImageSuccessfully(c, "order:test_b", withDockerfile(`FROM busybox
+	buildImageSuccessfully(c, "order:test_b", build.WithDockerfile(`FROM busybox
                 MAINTAINER dockerio3`))
 	id3 := getIDByName(c, "order:test_b")
 
@@ -67,7 +70,7 @@ func (s *DockerSuite) TestImagesOrderedByCreationDate(c *check.C) {
 
 func (s *DockerSuite) TestImagesErrorWithInvalidFilterNameTest(c *check.C) {
 	out, _, err := dockerCmdWithError("images", "-f", "FOO=123")
-	c.Assert(err, checker.NotNil)
+	assert.ErrorContains(c, err, "")
 	c.Assert(out, checker.Contains, "Invalid filter")
 }
 
@@ -75,15 +78,15 @@ func (s *DockerSuite) TestImagesFilterLabelMatch(c *check.C) {
 	imageName1 := "images_filter_test1"
 	imageName2 := "images_filter_test2"
 	imageName3 := "images_filter_test3"
-	buildImageSuccessfully(c, imageName1, withDockerfile(`FROM busybox
+	buildImageSuccessfully(c, imageName1, build.WithDockerfile(`FROM busybox
                  LABEL match me`))
 	image1ID := getIDByName(c, imageName1)
 
-	buildImageSuccessfully(c, imageName2, withDockerfile(`FROM busybox
+	buildImageSuccessfully(c, imageName2, build.WithDockerfile(`FROM busybox
                  LABEL match="me too"`))
 	image2ID := getIDByName(c, imageName2)
 
-	buildImageSuccessfully(c, imageName3, withDockerfile(`FROM busybox
+	buildImageSuccessfully(c, imageName3, build.WithDockerfile(`FROM busybox
                  LABEL nomatch me`))
 	image3ID := getIDByName(c, imageName3)
 
@@ -95,11 +98,11 @@ func (s *DockerSuite) TestImagesFilterLabelMatch(c *check.C) {
 
 	out, _ = dockerCmd(c, "images", "--no-trunc", "-q", "-f", "label=match=me too")
 	out = strings.TrimSpace(out)
-	c.Assert(out, check.Equals, image2ID)
+	assert.Equal(c, out, image2ID)
 }
 
 // Regression : #15659
-func (s *DockerSuite) TestImagesFilterLabelWithCommit(c *check.C) {
+func (s *DockerSuite) TestCommitWithFilterLabel(c *check.C) {
 	// Create a container
 	dockerCmd(c, "run", "--name", "bar", "busybox", "/bin/sh")
 	// Commit with labels "using changes"
@@ -108,17 +111,17 @@ func (s *DockerSuite) TestImagesFilterLabelWithCommit(c *check.C) {
 
 	out, _ = dockerCmd(c, "images", "--no-trunc", "-q", "-f", "label=foo.version=1.0.0-1")
 	out = strings.TrimSpace(out)
-	c.Assert(out, check.Equals, imageID)
+	assert.Equal(c, out, imageID)
 }
 
 func (s *DockerSuite) TestImagesFilterSinceAndBefore(c *check.C) {
-	buildImageSuccessfully(c, "image:1", withDockerfile(`FROM `+minimalBaseImage()+`
+	buildImageSuccessfully(c, "image:1", build.WithDockerfile(`FROM `+minimalBaseImage()+`
 LABEL number=1`))
 	imageID1 := getIDByName(c, "image:1")
-	buildImageSuccessfully(c, "image:2", withDockerfile(`FROM `+minimalBaseImage()+`
+	buildImageSuccessfully(c, "image:2", build.WithDockerfile(`FROM `+minimalBaseImage()+`
 LABEL number=2`))
 	imageID2 := getIDByName(c, "image:2")
-	buildImageSuccessfully(c, "image:3", withDockerfile(`FROM `+minimalBaseImage()+`
+	buildImageSuccessfully(c, "image:3", build.WithDockerfile(`FROM `+minimalBaseImage()+`
 LABEL number=3`))
 	imageID3 := getIDByName(c, "image:3")
 
@@ -184,7 +187,7 @@ func assertImageList(out string, expected []string) bool {
 func (s *DockerSuite) TestImagesFilterSpaceTrimCase(c *check.C) {
 	imageName := "images_filter_test"
 	// Build a image and fail to build so that we have dangling images ?
-	buildImage(imageName, withDockerfile(`FROM busybox
+	buildImage(imageName, build.WithDockerfile(`FROM busybox
                  RUN touch /test/foo
                  RUN touch /test/bar
                  RUN touch /test/baz`)).Assert(c, icmd.Expected{
@@ -251,7 +254,7 @@ func (s *DockerSuite) TestImagesEnsureDanglingImageOnlyListedOnce(c *check.C) {
 // FIXME(vdemeester) should be a unit test for `docker image ls`
 func (s *DockerSuite) TestImagesWithIncorrectFilter(c *check.C) {
 	out, _, err := dockerCmdWithError("images", "-f", "dangling=invalid")
-	c.Assert(err, check.NotNil)
+	assert.ErrorContains(c, err, "")
 	c.Assert(out, checker.Contains, "Invalid filter")
 }
 
@@ -261,7 +264,7 @@ func (s *DockerSuite) TestImagesEnsureOnlyHeadsImagesShown(c *check.C) {
         MAINTAINER docker
         ENV foo bar`
 	name := "scratch-image"
-	result := buildImage(name, withDockerfile(dockerfile))
+	result := buildImage(name, build.WithDockerfile(dockerfile))
 	result.Assert(c, icmd.Success)
 	id := getIDByName(c, name)
 
@@ -285,7 +288,7 @@ func (s *DockerSuite) TestImagesEnsureImagesFromScratchShown(c *check.C) {
         MAINTAINER docker`
 
 	name := "scratch-image"
-	buildImageSuccessfully(c, name, withDockerfile(dockerfile))
+	buildImageSuccessfully(c, name, build.WithDockerfile(dockerfile))
 	id := getIDByName(c, name)
 
 	out, _ := dockerCmd(c, "images")
@@ -301,7 +304,7 @@ func (s *DockerSuite) TestImagesEnsureImagesFromBusyboxShown(c *check.C) {
         MAINTAINER docker`
 	name := "busybox-image"
 
-	buildImageSuccessfully(c, name, withDockerfile(dockerfile))
+	buildImageSuccessfully(c, name, build.WithDockerfile(dockerfile))
 	id := getIDByName(c, name)
 
 	out, _ := dockerCmd(c, "images")
@@ -335,7 +338,7 @@ func (s *DockerSuite) TestImagesFormat(c *check.C) {
 	expected := []string{"myimage", "myimage"}
 	var names []string
 	names = append(names, lines...)
-	c.Assert(names, checker.DeepEquals, expected, check.Commentf("Expected array with truncated names: %v, got: %v", expected, names))
+	assert.Assert(c, is.DeepEqual(names, expected), "Expected array with truncated names: %v, got: %v", expected, names)
 }
 
 // ImagesDefaultFormatAndQuiet
@@ -354,12 +357,12 @@ func (s *DockerSuite) TestImagesFormatDefaultFormat(c *check.C) {
 		"imagesFormat": "{{ .ID }} default"
 }`
 	d, err := ioutil.TempDir("", "integration-cli-")
-	c.Assert(err, checker.IsNil)
+	assert.NilError(c, err)
 	defer os.RemoveAll(d)
 
 	err = ioutil.WriteFile(filepath.Join(d, "config.json"), []byte(config), 0644)
-	c.Assert(err, checker.IsNil)
+	assert.NilError(c, err)
 
 	out, _ = dockerCmd(c, "--config", d, "images", "-q", "myimage")
-	c.Assert(out, checker.Equals, imageID+"\n", check.Commentf("Expected to print only the image id, got %v\n", out))
+	assert.Equal(c, out, imageID+"\n", "Expected to print only the image id, got %v\n", out)
 }
